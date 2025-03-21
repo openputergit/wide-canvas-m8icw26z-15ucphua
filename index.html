@@ -1,0 +1,939 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Disease Outbreak Prediction System</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
+    <link href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        #map { height: 400px; }
+        .gradient-custom {
+            background: linear-gradient(120deg, #84fab0 0%, #8fd3f4 100%);
+        }
+        .region-selector {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            z-index: 1000;
+            background: white;
+            padding: 10px;
+            border-radius: 5px;
+            box-shadow: 0 1px 5px rgba(0,0,0,0.4);
+        }
+        .prediction-box {
+            transition: all 0.3s ease;
+        }
+        .loader {
+            border: 5px solid #f3f3f3;
+            border-top: 5px solid #3498db;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 2s linear infinite;
+            margin: 20px auto;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .tab-active {
+            background-color: rgba(20, 184, 166, 0.3);
+        }
+    </style>
+</head>
+<body class="bg-gray-50">
+    <nav class="bg-teal-600 text-white p-4">
+        <div class="container mx-auto flex flex-col sm:flex-row justify-between items-center">
+            <h1 class="text-2xl font-bold mb-2 sm:mb-0">Disease Outbreak Predictor</h1>
+            <div class="flex space-x-2 md:space-x-4">
+                <button class="hover:bg-teal-700 px-3 md:px-4 py-2 rounded tab-active" id="dashboardTab" onclick="switchTab('dashboard')">Dashboard</button>
+                <button class="hover:bg-teal-700 px-3 md:px-4 py-2 rounded" id="predictionsTab" onclick="switchTab('predictions')">Predictions</button>
+                <button class="hover:bg-teal-700 px-3 md:px-4 py-2 rounded" id="analysisTab" onclick="switchTab('analysis')">Analysis</button>
+                <button class="hover:bg-teal-700 px-3 md:px-4 py-2 rounded" id="historyTab" onclick="switchTab('history')">History</button>
+            </div>
+        </div>
+    </nav>
+
+    <main class="container mx-auto p-4">
+        <!-- Dashboard Section -->
+        <section id="dashboard" class="space-y-6">
+            <div class="grid md:grid-cols-3 gap-4">
+                <!-- Current Stats -->
+                <div class="bg-white p-6 rounded-lg shadow">
+                    <h3 class="text-xl font-semibold mb-4">Current Weather</h3>
+                    <div class="space-y-2">
+                        <p><i class="bi bi-thermometer-half"></i> Temperature: <span id="temp">25°C</span></p>
+                        <p><i class="bi bi-droplet"></i> Humidity: <span id="humidity">65%</span></p>
+                        <p><i class="bi bi-wind"></i> Wind: <span id="wind">12 km/h</span></p>
+                        <p><i class="bi bi-sunrise"></i> Air Quality: <span id="airquality">Moderate</span></p>
+                    </div>
+                </div>
+
+                <!-- Risk Level -->
+                <div class="bg-white p-6 rounded-lg shadow">
+                    <h3 class="text-xl font-semibold mb-4">Risk Level</h3>
+                    <div class="text-center">
+                        <div class="text-4xl font-bold text-yellow-500" id="riskLevel">Medium</div>
+                        <div class="w-full bg-gray-200 rounded-full h-2.5 mt-3">
+                            <div class="bg-yellow-500 h-2.5 rounded-full" id="riskIndicator" style="width: 50%"></div>
+                        </div>
+                        <p class="mt-2">Based on current conditions</p>
+                        <p class="text-sm text-gray-600 mt-2" id="riskFactors">Factors: Increasing humidity, moderate population density</p>
+                    </div>
+                </div>
+
+                <!-- Active Cases -->
+                <div class="bg-white p-6 rounded-lg shadow">
+                    <h3 class="text-xl font-semibold mb-4">Active Cases</h3>
+                    <canvas id="activeCasesChart"></canvas>
+                </div>
+            </div>
+
+            <!-- Map Section -->
+            <div class="bg-white p-6 rounded-lg shadow relative">
+                <h3 class="text-xl font-semibold mb-4">Disease Outbreak Heat Map</h3>
+                <div class="region-selector">
+                    <label class="block mb-2 text-sm font-medium">Select Region</label>
+                    <select class="p-2 border rounded text-sm w-full" id="regionSelect" onchange="changeRegion()">
+                        <option value="global">Global</option>
+                        <option value="asia">Asia</option>
+                        <option value="india">India</option>
+                        <option value="southeastAsia">Southeast Asia</option>
+                        <option value="africa">Africa</option>
+                        <option value="europe">Europe</option>
+                        <option value="northAmerica">North America</option>
+                        <option value="southAmerica">South America</option>
+                    </select>
+                </div>
+                <div id="map" class="rounded-lg"></div>
+            </div>
+
+            <!-- Prediction Controls -->
+            <div class="bg-white p-6 rounded-lg shadow">
+                <h3 class="text-xl font-semibold mb-4">Prediction Controls</h3>
+                <div class="grid md:grid-cols-3 gap-4">
+                    <div>
+                        <label class="block mb-2">Select Disease</label>
+                        <select class="w-full p-2 border rounded" id="diseaseSelect">
+                            <option>Influenza</option>
+                            <option>Dengue</option>
+                            <option>Malaria</option>
+                            <option>COVID-19</option>
+                            <option>Cholera</option>
+                            <option>Zika</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block mb-2">Time Period</label>
+                        <select class="w-full p-2 border rounded" id="timeSelect">
+                            <option>Next Week</option>
+                            <option>Next Month</option>
+                            <option>Next 3 Months</option>
+                            <option>Next 6 Months</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block mb-2">ML Model</label>
+                        <select class="w-full p-2 border rounded" id="modelSelect">
+                            <option>Random Forest</option>
+                            <option>XGBoost</option>
+                            <option>Neural Network</option>
+                            <option>Ensemble</option>
+                        </select>
+                    </div>
+                </div>
+                <button onclick="updatePrediction()" class="mt-4 bg-teal-600 text-white px-6 py-2 rounded hover:bg-teal-700">
+                    Update Prediction
+                </button>
+                <div id="predictionLoader" class="hidden">
+                    <div class="loader"></div>
+                    <p class="text-center text-gray-600">Processing prediction...</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- Predictions Section -->
+        <section id="predictions" class="space-y-6 hidden">
+            <div class="bg-white p-6 rounded-lg shadow">
+                <h3 class="text-xl font-semibold mb-4">Disease Outbreak Predictions</h3>
+                <div class="grid md:grid-cols-2 gap-6">
+                    <div class="space-y-4">
+                        <div class="prediction-box bg-yellow-50 border-l-4 border-yellow-500 p-4 rounded">
+                            <h4 class="font-semibold text-lg">Dengue Fever</h4>
+                            <p class="text-sm text-gray-700">Predicted outbreak in Southeast Asia over next 3 months</p>
+                            <div class="mt-2">
+                                <div class="text-sm text-gray-600">Confidence: 78%</div>
+                                <div class="w-full bg-gray-200 rounded-full h-2 mt-1">
+                                    <div class="bg-yellow-500 h-2 rounded-full" style="width: 78%"></div>
+                                </div>
+                            </div>
+                            <div class="mt-2 text-sm">
+                                <span class="font-medium">Key factors:</span> Increased rainfall, rising temperatures, historical patterns
+                            </div>
+                        </div>
+
+                        <div class="prediction-box bg-red-50 border-l-4 border-red-500 p-4 rounded">
+                            <h4 class="font-semibold text-lg">Malaria</h4>
+                            <p class="text-sm text-gray-700">High risk in Sub-Saharan Africa in the next month</p>
+                            <div class="mt-2">
+                                <div class="text-sm text-gray-600">Confidence: 85%</div>
+                                <div class="w-full bg-gray-200 rounded-full h-2 mt-1">
+                                    <div class="bg-red-500 h-2 rounded-full" style="width: 85%"></div>
+                                </div>
+                            </div>
+                            <div class="mt-2 text-sm">
+                                <span class="font-medium">Key factors:</span> Stagnant water, monsoon season, population density
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="space-y-4">
+                        <div class="prediction-box bg-green-50 border-l-4 border-green-500 p-4 rounded">
+                            <h4 class="font-semibold text-lg">Influenza</h4>
+                            <p class="text-sm text-gray-700">Moderate risk in North America for next 3 months</p>
+                            <div class="mt-2">
+                                <div class="text-sm text-gray-600">Confidence: 62%</div>
+                                <div class="w-full bg-gray-200 rounded-full h-2 mt-1">
+                                    <div class="bg-green-500 h-2 rounded-full" style="width: 62%"></div>
+                                </div>
+                            </div>
+                            <div class="mt-2 text-sm">
+                                <span class="font-medium">Key factors:</span> Seasonal patterns, dropping temperatures, vaccination rates
+                            </div>
+                        </div>
+
+                        <div class="prediction-box bg-blue-50 border-l-4 border-blue-500 p-4 rounded">
+                            <h4 class="font-semibold text-lg">Cholera</h4>
+                            <p class="text-sm text-gray-700">Potential outbreaks in coastal regions of South Asia</p>
+                            <div class="mt-2">
+                                <div class="text-sm text-gray-600">Confidence: 73%</div>
+                                <div class="w-full bg-gray-200 rounded-full h-2 mt-1">
+                                    <div class="bg-blue-500 h-2 rounded-full" style="width: 73%"></div>
+                                </div>
+                            </div>
+                            <div class="mt-2 text-sm">
+                                <span class="font-medium">Key factors:</span> Water contamination, recent flooding, sanitation issues
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="bg-white p-6 rounded-lg shadow">
+                <h3 class="text-xl font-semibold mb-4">Prediction Timeline</h3>
+                <canvas id="timelineChart" height="100"></canvas>
+            </div>
+
+            <div class="grid md:grid-cols-2 gap-6">
+                <div class="bg-white p-6 rounded-lg shadow">
+                    <h3 class="text-xl font-semibold mb-4">Recommended Interventions</h3>
+                    <ul class="list-disc pl-5 space-y-2">
+                        <li>Increase mosquito control programs in Southeast Asia</li>
+                        <li>Deploy mobile health clinics to high-risk areas in Africa</li>
+                        <li>Enhance water purification in coastal South Asian communities</li>
+                        <li>Prepare flu vaccination campaigns in North America</li>
+                        <li>Distribute bed nets in malaria-prone regions</li>
+                    </ul>
+                </div>
+
+                <div class="bg-white p-6 rounded-lg shadow">
+                    <h3 class="text-xl font-semibold mb-4">AI Confidence Analysis</h3>
+                    <p class="mb-4">Our machine learning models are calibrated on historical data from:</p>
+                    <div class="grid grid-cols-2 gap-2">
+                        <div class="bg-gray-100 p-3 rounded">
+                            <p class="font-medium">30+ years</p>
+                            <p class="text-sm text-gray-600">Historical Data</p>
+                        </div>
+                        <div class="bg-gray-100 p-3 rounded">
+                            <p class="font-medium">195 countries</p>
+                            <p class="text-sm text-gray-600">Geographical Coverage</p>
+                        </div>
+                        <div class="bg-gray-100 p-3 rounded">
+                            <p class="font-medium">25+ diseases</p>
+                            <p class="text-sm text-gray-600">Disease Profiles</p>
+                        </div>
+                        <div class="bg-gray-100 p-3 rounded">
+                            <p class="font-medium">100+ factors</p>
+                            <p class="text-sm text-gray-600">Environmental Variables</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Analysis Section -->
+        <section id="analysis" class="space-y-6 hidden">
+            <div class="bg-white p-6 rounded-lg shadow">
+                <h3 class="text-xl font-semibold mb-4">Comparative Analysis</h3>
+                <div class="grid md:grid-cols-2 gap-6">
+                    <div>
+                        <h4 class="font-semibold mb-2">Current vs Historical Conditions</h4>
+                        <canvas id="conditionsComparisonChart"></canvas>
+                    </div>
+                    <div>
+                        <h4 class="font-semibold mb-2">Disease Correlation Matrix</h4>
+                        <canvas id="correlationChart"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <div class="bg-white p-6 rounded-lg shadow">
+                <h3 class="text-xl font-semibold mb-4">Environmental Factors</h3>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div class="bg-gray-50 p-4 rounded">
+                        <h4 class="font-semibold">Temperature</h4>
+                        <canvas id="temperatureChart" height="150"></canvas>
+                        <p class="text-sm mt-2 text-gray-600">3.2°C above historical average for this region and season</p>
+                    </div>
+                    <div class="bg-gray-50 p-4 rounded">
+                        <h4 class="font-semibold">Precipitation</h4>
+                        <canvas id="rainfallChart" height="150"></canvas>
+                        <p class="text-sm mt-2 text-gray-600">42% more rainfall than expected for this period</p>
+                    </div>
+                    <div class="bg-gray-50 p-4 rounded">
+                        <h4 class="font-semibold">Population Density</h4>
+                        <canvas id="populationChart" height="150"></canvas>
+                        <p class="text-sm mt-2 text-gray-600">High correlation with disease spread in urban areas</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="bg-white p-6 rounded-lg shadow">
+                <h3 class="text-xl font-semibold mb-4">ML Model Performance</h3>
+                <div class="overflow-x-auto">
+                    <table class="min-w-full bg-white">
+                        <thead class="bg-gray-100">
+                            <tr>
+                                <th class="py-2 px-4 text-left">Model</th>
+                                <th class="py-2 px-4 text-left">Accuracy</th>
+                                <th class="py-2 px-4 text-left">Precision</th>
+                                <th class="py-2 px-4 text-left">Recall</th>
+                                <th class="py-2 px-4 text-left">F1 Score</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y">
+                            <tr>
+                                <td class="py-2 px-4">Random Forest</td>
+                                <td class="py-2 px-4">87.3%</td>
+                                <td class="py-2 px-4">84.1%</td>
+                                <td class="py-2 px-4">86.9%</td>
+                                <td class="py-2 px-4">85.5%</td>
+                            </tr>
+                            <tr>
+                                <td class="py-2 px-4">XGBoost</td>
+                                <td class="py-2 px-4">89.7%</td>
+                                <td class="py-2 px-4">88.3%</td>
+                                <td class="py-2 px-4">84.2%</td>
+                                <td class="py-2 px-4">86.2%</td>
+                            </tr>
+                            <tr>
+                                <td class="py-2 px-4">Neural Network</td>
+                                <td class="py-2 px-4">86.4%</td>
+                                <td class="py-2 px-4">83.7%</td>
+                                <td class="py-2 px-4">89.1%</td>
+                                <td class="py-2 px-4">86.3%</td>
+                            </tr>
+                            <tr>
+                                <td class="py-2 px-4 font-medium">Ensemble</td>
+                                <td class="py-2 px-4 font-medium">91.2%</td>
+                                <td class="py-2 px-4 font-medium">89.9%</td>
+                                <td class="py-2 px-4 font-medium">90.3%</td>
+                                <td class="py-2 px-4 font-medium">90.1%</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- History Section -->
+        <section id="history" class="space-y-6 hidden">
+            <div class="bg-white p-6 rounded-lg shadow">
+                <h3 class="text-xl font-semibold mb-4">Historical Outbreaks</h3>
+                
+                <div class="mb-4">
+                    <label class="block mb-2">Filter by Disease</label>
+                    <select class="w-full md:w-64 p-2 border rounded" id="historyDiseaseFilter" onchange="filterHistory()">
+                        <option value="all">All Diseases</option>
+                        <option value="malaria">Malaria</option>
+                        <option value="dengue">Dengue Fever</option>
+                        <option value="influenza">Influenza</option>
+                        <option value="cholera">Cholera</option>
+                    </select>
+                </div>
+                
+                <div class="overflow-x-auto">
+                    <table class="min-w-full bg-white">
+                        <thead class="bg-gray-100">
+                            <tr>
+                                <th class="py-2 px-4 text-left">Year</th>
+                                <th class="py-2 px-4 text-left">Disease</th>
+                                <th class="py-2 px-4 text-left">Region</th>
+                                <th class="py-2 px-4 text-left">Cases</th>
+                                <th class="py-2 px-4 text-left">Weather Conditions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="historyTableBody" class="divide-y">
+                            <!-- Table rows will be populated by JavaScript -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="grid md:grid-cols-2 gap-6">
+                <div class="bg-white p-6 rounded-lg shadow">
+                    <h3 class="text-xl font-semibold mb-4">Historical Pattern Analysis</h3>
+                    <canvas id="historicalPatternChart" height="250"></canvas>
+                    <p class="text-sm mt-3 text-gray-600">Seasonal patterns show clear correlation between climate factors and disease outbreaks across multiple years.</p>
+                </div>
+                
+                <div class="bg-white p-6 rounded-lg shadow">
+                    <h3 class="text-xl font-semibold mb-4">Pattern Recognition</h3>
+                    <div class="space-y-4">
+                        <div class="bg-blue-50 p-4 rounded">
+                            <h4 class="font-medium">Seasonal Influences</h4>
+                            <p class="text-sm">Consistent correlation between monsoon seasons and vector-borne diseases in tropical regions.</p>
+                        </div>
+                        <div class="bg-green-50 p-4 rounded">
+                            <h4 class="font-medium">Population Factors</h4>
+                            <p class="text-sm">Urban density increases transmission rate by 2.7x compared to rural areas with similar climate conditions.</p>
+                        </div>
+                        <div class="bg-yellow-50 p-4 rounded">
+                            <h4 class="font-medium">Climate Change Impact</h4>
+                            <p class="text-sm">Vector-borne diseases are expanding into new regions as temperatures rise globally.</p>
+                        </div>
+                        <div class="bg-purple-50 p-4 rounded">
+                            <h4 class="font-medium">Intervention Effectiveness</h4>
+                            <p class="text-sm">Early interventions reduced case numbers by an average of
+                            63% across historical outbreaks.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <footer class="bg-teal-700 text-white p-6 mt-8">
+        <div class="container mx-auto">
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div>
+                    <h4 class="text-lg font-semibold mb-3">Disease Outbreak Predictor</h4>
+                    <p class="text-sm">Using machine learning and historical data to predict and prevent disease outbreaks worldwide.</p>
+                </div>
+                <div>
+                    <h4 class="text-lg font-semibold mb-3">Data Sources</h4>
+                    <ul class="text-sm space-y-1">
+                        <li>World Health Organization</li>
+                        <li>Centers for Disease Control</li>
+                        <li>Global Weather Data Repository</li>
+                        <li>National Health Ministries</li>
+                    </ul>
+                </div>
+                <div>
+                    <h4 class="text-lg font-semibold mb-3">Contact</h4>
+                    <p class="text-sm">For more information or to contribute data, please contact:</p>
+                    <p class="text-sm mt-2">info@diseasepredictor.org</p>
+                </div>
+            </div>
+            <div class="mt-6 pt-6 border-t border-teal-600 text-sm text-center">
+                © 2023 Disease Outbreak Prediction System. All data is provided for informational purposes only.
+            </div>
+        </div>
+    </footer>
+
+    <script>
+        // Initialize map
+        const map = L.map('map').setView([20, 0], 2);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+
+        // Region coordinates for the map
+        const regions = {
+            global: { center: [20, 0], zoom: 2 },
+            asia: { center: [34, 100], zoom: 3 },
+            india: { center: [20, 78], zoom: 5 },
+            southeastAsia: { center: [10, 106], zoom: 4 },
+            africa: { center: [0, 20], zoom: 3 },
+            europe: { center: [50, 10], zoom: 4 },
+            northAmerica: { center: [40, -95], zoom: 3 },
+            southAmerica: { center: [-15, -60], zoom: 3 }
+        };
+
+        // Sample heatmap data by region
+        const heatmapDataByRegion = {
+            global: [
+                {lat: 40.7128, lng: -74.0060, intensity: 0.8},
+                {lat: 51.5074, lng: -0.1278, intensity: 0.6},
+                {lat: 48.8566, lng: 2.3522, intensity: 0.4},
+                {lat: 19.0760, lng: 72.8777, intensity: 0.9},
+                {lat: 35.6762, lng: 139.6503, intensity: 0.5},
+                {lat: -33.8688, lng: 151.2093, intensity: 0.3}
+            ],
+            asia: [
+                {lat: 19.0760, lng: 72.8777, intensity: 0.9}, // Mumbai
+                {lat: 28.6139, lng: 77.2090, intensity: 0.7}, // Delhi
+                {lat: 35.6762, lng: 139.6503, intensity: 0.5}, // Tokyo
+                {lat: 31.2304, lng: 121.4737, intensity: 0.8}, // Shanghai
+                {lat: 13.7563, lng: 100.5018, intensity: 0.6}, // Bangkok
+                {lat: 1.3521, lng: 103.8198, intensity: 0.4}  // Singapore
+            ],
+            india: [
+                {lat: 19.0760, lng: 72.8777, intensity: 0.9}, // Mumbai
+                {lat: 28.6139, lng: 77.2090, intensity: 0.7}, // Delhi
+                {lat: 12.9716, lng: 77.5946, intensity: 0.8}, // Bangalore
+                {lat: 17.3850, lng: 78.4867, intensity: 0.6}, // Hyderabad
+                {lat: 22.5726, lng: 88.3639, intensity: 0.7}, // Kolkata
+                {lat: 13.0827, lng: 80.2707, intensity: 0.5}  // Chennai
+            ],
+            southeastAsia: [
+                {lat: 13.7563, lng: 100.5018, intensity: 0.9}, // Bangkok
+                {lat: 14.5995, lng: 120.9842, intensity: 0.7}, // Manila
+                {lat: 21.0285, lng: 105.8542, intensity: 0.8}, // Hanoi
+                {lat: 11.5564, lng: 104.9282, intensity: 0.6}, // Phnom Penh
+                {lat: -6.2088, lng: 106.8456, intensity: 0.8}, // Jakarta
+                {lat: 3.1390, lng: 101.6869, intensity: 0.5}   // Kuala Lumpur
+            ]
+        };
+
+        // Add other regions with similar patterns
+        ['africa', 'europe', 'northAmerica', 'southAmerica'].forEach(region => {
+            heatmapDataByRegion[region] = heatmapDataByRegion.global.map(point => {
+                // Create slightly different data for each region
+                return {
+                    lat: point.lat + (Math.random() * 10 - 5),
+                    lng: point.lng + (Math.random() * 20 - 10),
+                    intensity: Math.min(0.9, Math.max(0.2, point.intensity + (Math.random() * 0.4 - 0.2)))
+                };
+            });
+        });
+
+        let currentHeatmapMarkers = [];
+
+        function updateHeatmap(region) {
+            // Clear existing markers
+            currentHeatmapMarkers.forEach(marker => map.removeLayer(marker));
+            currentHeatmapMarkers = [];
+            
+            // Add new markers for the selected region
+            const data = heatmapDataByRegion[region] || heatmapDataByRegion.global;
+            data.forEach(point => {
+                const marker = L.circle([point.lat, point.lng], {
+                    color: 'red',
+                    fillColor: '#f03',
+                    fillOpacity: point.intensity,
+                    radius: 100000
+                }).addTo(map);
+                currentHeatmapMarkers.push(marker);
+            });
+        }
+
+        function changeRegion() {
+            const region = document.getElementById('regionSelect').value;
+            const coords = regions[region] || regions.global;
+            map.setView([coords.center[0], coords.center[1]], coords.zoom);
+            updateHeatmap(region);
+        }
+
+        // Initialize with global data
+        updateHeatmap('global');
+
+        // Initialize charts
+        function initCharts() {
+            // Active cases chart
+            const ctxActive = document.getElementById('activeCasesChart').getContext('2d');
+            new Chart(ctxActive, {
+                type: 'line',
+                data: {
+                    labels: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'],
+                    datasets: [{
+                        label: 'Active Cases',
+                        data: [65, 59, 80, 81, 56, 55],
+                        borderColor: 'rgb(75, 192, 192)',
+                        tension: 0.1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    plugins: {
+                        legend: {
+                            display: false
+                        }
+                    }
+                }
+            });
+
+            // Timeline chart
+            if (document.getElementById('timelineChart')) {
+                const ctxTimeline = document.getElementById('timelineChart').getContext('2d');
+                new Chart(ctxTimeline, {
+                    type: 'line',
+                    data: {
+                        labels: ['Week 1', 'Week 2', 'Week 3', 'Week 4', 'Month 2', 'Month 3'],
+                        datasets: [
+                            {
+                                label: 'Dengue',
+                                data: [10, 25, 45, 70, 85, 65],
+                                borderColor: 'rgb(255, 159, 64)',
+                                backgroundColor: 'rgba(255, 159, 64, 0.1)',
+                                tension: 0.4,
+                                fill: true
+                            },
+                            {
+                                label: 'Malaria',
+                                data: [5, 15, 30, 50, 65, 80],
+                                borderColor: 'rgb(255, 99, 132)',
+                                backgroundColor: 'rgba(255, 99, 132, 0.1)',
+                                tension: 0.4,
+                                fill: true
+                            },
+                            {
+                                label: 'Influenza',
+                                data: [30, 25, 20, 15, 10, 5],
+                                borderColor: 'rgb(54, 162, 235)',
+                                backgroundColor: 'rgba(54, 162, 235, 0.1)',
+                                tension: 0.4,
+                                fill: true
+                            }
+                        ]
+                    },
+                    options: {
+                        responsive: true,
+                        plugins: {
+                            title: {
+                                display: true,
+                                text: 'Disease Progression Forecast'
+                            }
+                        }
+                    }
+                });
+            }
+
+            // Initialize analysis charts if they exist
+            if (document.getElementById('conditionsComparisonChart')) {
+                const ctxConditions = document.getElementById('conditionsComparisonChart').getContext('2d');
+                new Chart(ctxConditions, {
+                    type: 'radar',
+                    data: {
+                        labels: ['Temperature', 'Humidity', 'Rainfall', 'Wind', 'Air Quality', 'Sunlight'],
+                        datasets: [
+                            {
+                                label: 'Current Conditions',
+                                data: [80, 65, 75, 40, 55, 60],
+                                borderColor: 'rgb(54, 162, 235)',
+                                backgroundColor: 'rgba(54, 162, 235, 0.2)'
+                            },
+                            {
+                                label: 'Historical Average',
+                                data: [60, 55, 50, 45, 60, 70],
+                                borderColor: 'rgb(255, 99, 132)',
+                                backgroundColor: 'rgba(255, 99, 132, 0.2)'
+                            }
+                        ]
+                    },
+                    options: {
+                        responsive: true,
+                        scales: {
+                            r: {
+                                min: 0,
+                                max: 100
+                            }
+                        }
+                    }
+                });
+            }
+
+            // Initialize correlation chart if it exists
+            if (document.getElementById('correlationChart')) {
+                const ctxCorrelation = document.getElementById('correlationChart').getContext('2d');
+                new Chart(ctxCorrelation, {
+                    type: 'heatmap',
+                    data: {
+                        datasets: [{
+                            data: [
+                                {x: 'Temp', y: 'Dengue', v: 0.9},
+                                {x: 'Humid', y: 'Dengue', v: 0.8},
+                                {x: 'Rain', y: 'Dengue', v: 0.7},
+                                {x: 'Temp', y: 'Malaria', v: 0.6},
+                                {x: 'Humid', y: 'Malaria', v: 0.9},
+                                {x: 'Rain', y: 'Malaria', v: 0.8},
+                                {x: 'Temp', y: 'Influenza', v: 0.3},
+                                {x: 'Humid', y: 'Influenza', v: 0.4},
+                                {x: 'Rain', y: 'Influenza', v: 0.1}
+                            ],
+                            backgroundColor(context) {
+                                const value = context.dataset.data[context.dataIndex].v;
+                                const alpha = value;
+                                return `rgba(255, 99, 132, ${alpha})`;
+                            },
+                            borderColor: 'white',
+                            borderWidth: 1
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        plugins: {
+                            legend: {
+                                display: false
+                            }
+                        },
+                        scales: {
+                            y: {
+                                type: 'category',
+                                labels: ['Dengue', 'Malaria', 'Influenza']
+                            },
+                            x: {
+                                type: 'category',
+                                labels: ['Temp', 'Humid', 'Rain']
+                            }
+                        }
+                    }
+                });
+            }
+
+            // Environmental factor charts
+            const environmentalCharts = [
+                { id: 'temperatureChart', color: 'rgb(255, 159, 64)' },
+                { id: 'rainfallChart', color: 'rgb(54, 162, 235)' },
+                { id: 'populationChart', color: 'rgb(153, 102, 255)' }
+            ];
+
+            environmentalCharts.forEach(chart => {
+                const ctx = document.getElementById(chart.id);
+                if (ctx) {
+                    new Chart(ctx.getContext('2d'), {
+                        type: 'line',
+                        data: {
+                            labels: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'],
+                            datasets: [
+                                {
+                                    label: 'Current Year',
+                                    data: Array.from({length: 6}, () => Math.floor(Math.random() * 50) + 50),
+                                    borderColor: chart.color,
+                                    backgroundColor: 'transparent'
+                                },
+                                {
+                                    label: 'Historical Average',
+                                    data: Array.from({length: 6}, () => Math.floor(Math.random() * 30) + 40),
+                                    borderColor: 'rgba(128, 128, 128, 0.7)',
+                                    backgroundColor: 'transparent',
+                                    borderDash: [5, 5]
+                                }
+                            ]
+                        },
+                        options: {
+                            responsive: true,
+                            plugins: {
+                                legend: {
+                                    position: 'top',
+                                }
+                            }
+                        }
+                    });
+                }
+            });
+
+            // Historical pattern chart
+            if (document.getElementById('historicalPatternChart')) {
+                const ctxHistorical = document.getElementById('historicalPatternChart').getContext('2d');
+                new Chart(ctxHistorical, {
+                    type: 'line',
+                    data: {
+                        labels: ['2018', '2019', '2020', '2021', '2022', '2023'],
+                        datasets: [
+                            {
+                                label: 'Disease Cases',
+                                data: [4500, 5200, 4800, 6700, 7200, 6500],
+                                borderColor: 'rgb(75, 192, 192)',
+                                backgroundColor: 'transparent',
+                                yAxisID: 'y'
+                            },
+                            {
+                                label: 'Avg. Temperature',
+                                data: [24, 25, 26, 25.5, 27, 28],
+                                borderColor: 'rgb(255, 99, 132)',
+                                backgroundColor: 'transparent',
+                                yAxisID: 'y1'
+                            },
+                            {
+                                label: 'Rainfall (mm)',
+                                data: [800, 950, 760, 1100, 1200, 980],
+                                borderColor: 'rgb(54, 162, 235)',
+                                backgroundColor: 'transparent',
+                                yAxisID: 'y2'
+                            }
+                        ]
+                    },
+                    options: {
+                        responsive: true,
+                        interaction: {
+                            mode: 'index',
+                            intersect: false,
+                        },
+                        scales: {
+                            y: {
+                                type: 'linear',
+                                display: true,
+                                position: 'left',
+                                title: {
+                                    display: true,
+                                    text: 'Cases'
+                                }
+                            },
+                            y1: {
+                                type: 'linear',
+                                display: true,
+                                position: 'right',
+                                title: {
+                                    display: true,
+                                    text: 'Temp (°C)'
+                                },
+                                grid: {
+                                    drawOnChartArea: false
+                                }
+                            },
+                            y2: {
+                                type: 'linear',
+                                display: true,
+                                position: 'right',
+                                title: {
+                                    display: true,
+                                    text: 'Rain (mm)'
+                                },
+                                grid: {
+                                    drawOnChartArea: false
+                                }
+                            }
+                        }
+                    }
+                });
+            }
+        }
+
+        // Historical data for the table
+        const historicalData = [
+            { year: 2022, disease: 'Dengue Fever', region: 'Southeast Asia', cases: 78000, weather: 'High rainfall, 32°C avg temp' },
+            { year: 2022, disease: 'Malaria', region: 'Sub-Saharan Africa', cases: 125000, weather: 'Humid, 29°C avg temp' },
+            { year: 2021, disease: 'Influenza', region: 'North America', cases: 48000, weather: 'Cold winter, low humidity' },
+            { year: 2021, disease: 'Cholera', region: 'South Asia', cases: 32000, weather: 'Monsoon floods, contaminated water' },
+            { year: 2020, disease: 'Dengue Fever', region: 'India', cases: 67000, weather: 'Heavy rains, 31°C avg temp' },
+            { year: 2020, disease: 'Malaria', region: 'Central Africa', cases: 98000, weather: 'Wet season, standing water' },
+            { year: 2019, disease: 'Zika', region: 'South America', cases: 41000, weather: 'Warm, humid, 30°C avg temp' },
+            { year: 2019, disease: 'Influenza', region: 'Europe', cases: 53000, weather: 'Winter season, below freezing' },
+            { year: 2018, disease: 'Dengue Fever', region: 'Philippines', cases: 59000, weather: 'Rainy season, 30°C avg temp' },
+            { year: 2018, disease: 'Cholera', region: 'Yemen', cases: 28000, weather: 'Dry, water shortages' }
+        ];
+
+        function filterHistory() {
+            const filter = document.getElementById('historyDiseaseFilter').value;
+            const tableBody = document.getElementById('historyTableBody');
+            
+            // Clear the table
+            tableBody.innerHTML = '';
+            
+            // Filter and rebuild the table
+            const filteredData = filter === 'all' 
+                ? historicalData 
+                : historicalData.filter(item => item.disease.toLowerCase().includes(filter.toLowerCase()));
+                
+            filteredData.forEach(item => {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td class="py-2 px-4">${item.year}</td>
+                    <td class="py-2 px-4">${item.disease}</td>
+                    <td class="py-2 px-4">${item.region}</td>
+                    <td class="py-2 px-4">${item.cases.toLocaleString()}</td>
+                    <td class="py-2 px-4">${item.weather}</td>
+                `;
+                tableBody.appendChild(row);
+            });
+        }
+
+        // Tab switching function
+        function switchTab(tabId) {
+            // Hide all sections
+            document.querySelectorAll('main > section').forEach(section => {
+                section.classList.add('hidden');
+            });
+            
+            // Show the selected section
+            document.getElementById(tabId).classList.remove('hidden');
+            
+            // Update active tab styles
+            document.querySelectorAll('nav button').forEach(button => {
+                button.classList.remove('tab-active');
+            });
+            document.getElementById(`${tabId}Tab`).classList.add('tab-active');
+        }
+
+        // Update prediction function
+        function updatePrediction() {
+            const disease = document.getElementById('diseaseSelect').value;
+            const time = document.getElementById('timeSelect').value;
+            const model = document.getElementById('modelSelect').value;
+            
+            // Show loader
+            document.getElementById('predictionLoader').classList.remove('hidden');
+            
+            // Simulate API call delay
+            setTimeout(() => {
+                // Hide loader
+                document.getElementById('predictionLoader').classList.add('hidden');
+                
+                // Update risk level randomly for demo
+                const riskLevels = ['Low', 'Medium', 'High', 'Very High'];
+                const riskColors = ['text-green-500', 'text-yellow-500', 'text-orange-500', 'text-red-500'];
+                const riskBgColors = ['bg-green-500', 'bg-yellow-500', 'bg-orange-500', 'bg-red-500'];
+                const riskIndex = Math.floor(Math.random() * 4);
+                
+                document.getElementById('riskLevel').textContent = riskLevels[riskIndex];
+                document.getElementById('riskLevel').className = `text-4xl font-bold ${riskColors[riskIndex]}`;
+                
+                const riskIndicator = document.getElementById('riskIndicator');
+                riskIndicator.className = `${riskBgColors[riskIndex]} h-2.5 rounded-full`;
+                riskIndicator.style.width = `${(riskIndex + 1) * 25}%`;
+                
+                // Update risk factors text
+                const factors = [
+                    `Selected ${disease} disease analysis complete`,
+                    `${time} prediction using ${model} model`, 
+                    `Environmental conditions favorable for transmission`
+                ];
+                document.getElementById('riskFactors').textContent = `Factors: ${factors.join(', ')}`;
+                
+                // Alert completion
+                alert(`Prediction updated for ${disease} over ${time} using ${model} model. Risk level: ${riskLevels[riskIndex]}`);
+            }, 2000);
+        }
+
+        // Simulate real-time weather updates
+        function updateWeatherData() {
+            const temps = [22, 23, 24, 25, 26, 27, 28, 29, 30];
+            const humidities = [55, 60, 65, 70, 75, 80, 85];
+            const winds = [5, 8, 10, 12, 15, 18];
+            const airQualities = ['Good', 'Moderate', 'Poor', 'Unhealthy'];
+            
+            document.getElementById('temp').textContent = `${temps[Math.floor(Math.random() * temps.length)]}°C`;
+            document.getElementById('humidity').textContent = `${humidities[Math.floor(Math.random() * humidities.length)]}%`;
+            document.getElementById('wind').textContent = `${winds[Math.floor(Math.random() * winds.length)]} km/h`;
+            document.getElementById('airquality').textContent = airQualities[Math.floor(Math.random() * airQualities.length)];
+        }
+
+        // Initialize everything when the page loads
+        document.addEventListener('DOMContentLoaded', function() {
+            initCharts();
+            filterHistory();
+            updateWeatherData();
+            
+            // Update weather periodically
+            setInterval(updateWeatherData, 5000);
+        });
+    </script>
+<script>document.body.addEventListener('wheel', e => { if (!e.ctrlKey) return; e.preventDefault(); return }, { passive: false })</script>
+	</body>
+</html>
